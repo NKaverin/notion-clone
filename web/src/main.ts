@@ -8,7 +8,7 @@ type Health = {
 
 async function loadHealth() {
   const response = await fetch("/api/health");
-  if (response.ok) {
+  if (!response.ok) {
     app.textContent = "server error: " + response.status;
     return;
   }
