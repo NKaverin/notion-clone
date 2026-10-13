@@ -53,15 +53,16 @@ def health():
 
 @app.post("/api/auth/request-code")
 def request_code(body: CodeRequest):
+    email = body.email.lower()
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = int(time.time()) + CODE_TTL_SECONDS
     db = get_db()
     db.executemany(
         "INSERT INTO login_codes (email, code_hash, expires_at) VALUES (?, ? , ?)",
-        (body.email, hash_code(code), expires_at),
+        (email, hash_code(code), expires_at),
     )
     db.commit()
     db.close()
-    print("LOGIN CODE", body.email, code)
+    print("LOGIN CODE", email, code)
     return {"sent": True}
 
