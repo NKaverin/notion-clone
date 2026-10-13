@@ -1,6 +1,6 @@
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
-app.textContent = "notion-clone"
+app.textContent = "notion-clone";
 
 type Health = {
   status: string;
