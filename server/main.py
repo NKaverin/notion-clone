@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 
 DB_PATH = Path(__file__).parent / "notion.db"
@@ -18,6 +18,10 @@ CODE_TTL_SECONDS = 10 * 60
 
 class CodeRequest(BaseModel):
     email: EmailStr
+
+class CodeVerify(BaseModel):
+    email: EmailStr
+    code: str
 
 def hash_code(code: str) -> str:
     return hmac.new(SECRET_KEY, code.encode(), hashlib.sha256).hexdigest()
@@ -67,4 +71,28 @@ def request_code(body: CodeRequest):
     db.close()
     print("LOGIN CODE", email, code)
     return {"sent": True}
+
+@app.post("/api/auth/verify")
+def verify(body: CodeVerify):
+    email = body.email.lower()
+    now = int(time.time())
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT *
+            FROM login_codes
+            WHERE email = ? AND expires_at > ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (email, now),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=400, detail="Invalid or expired code")
+        print("row", dict(row))
+        if not hmac.compare_digest(row["code_hash"], hash_code(body.code)):
+            raise HTTPException(status_code=400, detail="Invalid or expired code")
+        return {"ok": True}
+    finally:
+        db.close()
 
