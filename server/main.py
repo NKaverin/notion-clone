@@ -82,7 +82,7 @@ def verify(body: CodeVerify):
             """
             SELECT *
             FROM login_codes
-            WHERE email = ? AND expires_at > ?
+            WHERE email = ? AND expires_at > ? AND used = 0
             ORDER BY id DESC LIMIT 1
             """,
             (email, now),
@@ -92,6 +92,8 @@ def verify(body: CodeVerify):
         print("row", dict(row))
         if not hmac.compare_digest(row["code_hash"], hash_code(body.code)):
             raise HTTPException(status_code=400, detail="Invalid or expired code")
+        db.execute("UPDATE login_codes SET used = 1 WHERE email = ?", (email,))
+        db.commit()
         return {"ok": True}
     finally:
         db.close()
