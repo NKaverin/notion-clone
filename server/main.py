@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr
 DB_PATH = Path(__file__).parent / "notion.db"
 SECRET_KEY = os.environ.get("NOTION_SECRET_KEY", "dev-secret-change-me").encode()
 CODE_TTL_SECONDS = 10 * 60
+MAX_ATTEMPTS = 5
 
 
 class CodeRequest(BaseModel):
@@ -41,6 +42,13 @@ def init_db():
             expires_at INTEGER NOT NULL,
             used INTEGER NOT NULL DEFAULT 0,
             attempts INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER NOT NULL PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            created_at INTEGER NOT NULL
         )
     """)
     db.commit()
@@ -77,24 +85,30 @@ def verify(body: CodeVerify):
     email = body.email.lower()
     now = int(time.time())
     db = get_db()
+    db.execute("UPDATE login_codes SET used = 1 WHERE email = ?", (email,))
     try:
         row = db.execute(
             """
             SELECT *
             FROM login_codes
-            WHERE email = ? AND expires_at > ? AND used = 0
+            WHERE email = ? AND expires_at > ? AND used = 0 and attempts < ?
             ORDER BY id DESC LIMIT 1
             """,
-            (email, now),
+            (email, now, MAX_ATTEMPTS),
         ).fetchone()
         if row is None:
             raise HTTPException(status_code=400, detail="Invalid or expired code")
-        print("row", dict(row))
         if not hmac.compare_digest(row["code_hash"], hash_code(body.code)):
+            db.execute("UPDATE login_codes SET attempts = attempts + 1 WHERE id = ?", (row["id"],))
+            db.commit()
             raise HTTPException(status_code=400, detail="Invalid or expired code")
         db.execute("UPDATE login_codes SET used = 1 WHERE email = ?", (email,))
+        user = db.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
+        if user is None:
+            db.execute("INSERT INTO users (email, created_at) VALUES (?, ?)", (email, now))
+            user = db.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
         db.commit()
-        return {"ok": True}
+        return {"id": user["id"], "email": user["email"]}
     finally:
         db.close()
 
