@@ -71,6 +71,7 @@ def request_code(body: CodeRequest):
     code = f"{secrets.randbelow(1_000_000):06d}"
     expires_at = int(time.time()) + CODE_TTL_SECONDS
     db = get_db()
+    db.execute("UPDATE login_codes SET used = 1 WHERE email = ?", (email,))
     db.execute(
         "INSERT INTO login_codes (email, code_hash, expires_at) VALUES (?, ? , ?)",
         (email, hash_code(code), expires_at),
@@ -85,7 +86,6 @@ def verify(body: CodeVerify):
     email = body.email.lower()
     now = int(time.time())
     db = get_db()
-    db.execute("UPDATE login_codes SET used = 1 WHERE email = ?", (email,))
     try:
         row = db.execute(
             """
@@ -100,6 +100,7 @@ def verify(body: CodeVerify):
             raise HTTPException(status_code=400, detail="Invalid or expired code")
         if not hmac.compare_digest(row["code_hash"], hash_code(body.code)):
             db.execute("UPDATE login_codes SET attempts = attempts + 1 WHERE id = ?", (row["id"],))
+            # Commit before raising, or the count is lost.
             db.commit()
             raise HTTPException(status_code=400, detail="Invalid or expired code")
         db.execute("UPDATE login_codes SET used = 1 WHERE email = ?", (email,))
