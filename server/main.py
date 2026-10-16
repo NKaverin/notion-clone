@@ -160,3 +160,17 @@ def verify(body: CodeVerify, response: Response):
 @app.get("/api/me")
 def me(user: dict = Depends(current_user)):
     return user
+
+@app.post("/api/auth/logout")
+def logout(response: Response, session: str | None = Cookie(default=None)):
+    # logging out works even if there is no session or expired
+    if session is not None:
+        db = get_db()
+        try:
+            db.execute("DELETE FROM sessions WHERE token_hash = ?",
+                    (hash_token(session),))
+            db.commit()
+            response.delete_cookie("session")
+        finally:
+            db.close()    
+    return {"ok": True}
