@@ -8,14 +8,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, EmailStr
 
 DB_PATH = Path(__file__).parent / "notion.db"
 SECRET_KEY = os.environ.get("NOTION_SECRET_KEY", "dev-secret-change-me").encode()
 CODE_TTL_SECONDS = 10 * 60
 MAX_ATTEMPTS = 5
-
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 class CodeRequest(BaseModel):
     email: EmailStr
@@ -26,6 +26,9 @@ class CodeVerify(BaseModel):
 
 def hash_code(code: str) -> str:
     return hmac.new(SECRET_KEY, code.encode(), hashlib.sha256).hexdigest()
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 def get_db():
     db = sqlite3.connect(DB_PATH)
@@ -49,6 +52,14 @@ def init_db():
             id INTEGER NOT NULL PRIMARY KEY,
             email TEXT NOT NULL UNIQUE,
             created_at INTEGER NOT NULL
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at INTEGER NOT NULL
         )
     """)
     db.commit()
@@ -82,7 +93,7 @@ def request_code(body: CodeRequest):
     return {"sent": True}
 
 @app.post("/api/auth/verify")
-def verify(body: CodeVerify):
+def verify(body: CodeVerify, response: Response):
     email = body.email.lower()
     now = int(time.time())
     db = get_db()
@@ -108,6 +119,17 @@ def verify(body: CodeVerify):
         if user is None:
             db.execute("INSERT INTO users (email, created_at) VALUES (?, ?)", (email, now))
             user = db.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
+        # The token goes to the browser, only hash is stored
+        token = secrets.token_urlsafe(32)
+        db.execute(
+            "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+            (user["id"], hash_token(token), now + SESSION_TTL_SECONDS),
+        )
+        print("token", token)
+        # No secure flag, it is not production
+        response.set_cookie(
+            "session", token, max_age=SESSION_TTL_SECONDS, httponly=True, samesite="lax"
+        )
         db.commit()
         return {"id": user["id"], "email": user["email"]}
     finally:
