@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, EmailStr
 
 DB_PATH = Path(__file__).parent / "notion.db"
@@ -71,6 +71,28 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+def current_user(session: str | None = Cookie(default=None)) -> dict:
+    # for Depends(current_user), stops the request before an endpoint runs
+    print ("current_user called with", session)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    db =get_db()
+    try:
+        user = db.execute(
+            """
+            SELECT users.id, users.email
+            FROM sessions
+            JOIN users ON users.id = sessions.user_id
+            WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+            """,
+            (hash_token(session), int(time.time())),
+        ).fetchone()
+    finally:
+        db.close()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    return dict(user)
 
 @app.get("/api/health")
 def health():
@@ -135,3 +157,6 @@ def verify(body: CodeVerify, response: Response):
     finally:
         db.close()
 
+@app.get("/api/me")
+def me(user: dict = Depends(current_user)):
+    return user
