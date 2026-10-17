@@ -74,7 +74,6 @@ app = FastAPI(lifespan=lifespan)
 
 def current_user(session: str | None = Cookie(default=None)) -> dict:
     # for Depends(current_user), stops the request before an endpoint runs
-    print ("current_user called with", session)
     if session is None:
         raise HTTPException(status_code=401, detail="Not logged in")
     db =get_db()
@@ -147,7 +146,6 @@ def verify(body: CodeVerify, response: Response):
             "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
             (user["id"], hash_token(token), now + SESSION_TTL_SECONDS),
         )
-        print("token", token)
         # No secure flag, it is not production
         response.set_cookie(
             "session", token, max_age=SESSION_TTL_SECONDS, httponly=True, samesite="lax"
