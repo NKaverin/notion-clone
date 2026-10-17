@@ -1,5 +1,10 @@
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
+type User = {
+  id: number;
+  email: string;
+};
+
 function makeLink(text: string, path: string): HTMLAnchorElement {
   const link = document.createElement("a");
   link.href = path;
@@ -82,10 +87,26 @@ function renderCodeForm(email: string) {
   app.replaceChildren(title, hint, form, message, makeLink("Start again", "/login"));
 }
 
-function renderWorkspace() {
+async function renderWorkspace() {
+  app.replaceChildren("Loading...");
+  // Check cookie
+  const response = await fetch("/api/me");
+  if (response.status === 401) {
+    redirect("/login");
+    return;
+  }
+  const user: User = await response.json();
   const title = document.createElement("h1");
   title.textContent = "Workspace";
-  app.replaceChildren(title);
+  const who = document.createElement("p");
+  who.textContent = "Logged in as " + user.email;
+  const logout = document.createElement("button");
+  logout.textContent = "Log out";
+  logout.addEventListener("click", async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    navigate("/");
+  });
+  app.replaceChildren(title, who, logout);
 }
 
 function renderNotFound() {
@@ -107,6 +128,12 @@ function render() {
 
 function navigate(path: string) {
   history.pushState(null, "", path);
+  render();
+}
+
+// Like navigate, but replaces the current history instead of adding one
+function redirect(path: string) {
+  history.replaceState(null, "", path);
   render();
 }
 
