@@ -10,8 +10,8 @@ function makeLink(text: string, path: string): HTMLAnchorElement {
   link.href = path;
   link.textContent = text;
   link.addEventListener("click", (event) => {
-    if (event.button !== 0) {
-      return link;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+      return;
     }
     event.preventDefault();
     navigate(path);
