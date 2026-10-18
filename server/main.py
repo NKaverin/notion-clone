@@ -62,6 +62,15 @@ def init_db():
             expires_at INTEGER NOT NULL
         )
     """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS pages (
+            id INTEGER PRIMARY KEY,
+            owner_id INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT 'Untitled',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+    """)
     db.commit()
     db.close()
 
@@ -96,6 +105,8 @@ def current_user(session: str | None = Cookie(default=None)) -> dict:
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+# Auth
 
 @app.post("/api/auth/request-code")
 def request_code(body: CodeRequest):
@@ -172,3 +183,33 @@ def logout(response: Response, session: str | None = Cookie(default=None)):
         finally:
             db.close()    
     return {"ok": True}
+
+# Pages
+
+@app.get("/api/pages")
+def list_pages(user: dict = Depends(current_user)):
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT id, title, updated_at FROM pages WHERE owner_id = ? ORDER BY id",
+            (user["id"],),
+        ).fetchall()
+    finally:
+        db.close()
+    return [dict(row) for row in rows]
+
+# 201 - a resource did not exist before
+@app.post("/api/pages", status_code=201)
+def create_page(user: dict = Depends(current_user)):
+    now = int(time.time())
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO pages (owner_id, created_at, updated_at) VALUES (?, ?, ?)",
+            (user["id"], now, now),
+        )
+        db.commit()
+    finally:
+        db.close()
+    # lastrowid: the id SQLite just assigned to the inserted row
+    return {"id": cursor.lastrowid, "title": "Untitled", "updated_at": now}
