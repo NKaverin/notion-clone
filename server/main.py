@@ -213,3 +213,18 @@ def create_page(user: dict = Depends(current_user)):
         db.close()
     # lastrowid: the id SQLite just assigned to the inserted row
     return {"id": cursor.lastrowid, "title": "Untitled", "updated_at": now}
+
+@app.get("/api/pages/{page_id}")
+def get_page(page_id: int, user: dict = Depends(current_user)):
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id, title, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
+            (page_id, user["id"]),
+        ).fetchone()
+    finally:
+        db.close()
+    # If owned by someone else, gets the same 404
+    if row is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return dict(row)
