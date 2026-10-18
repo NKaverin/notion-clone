@@ -5,6 +5,12 @@ type User = {
   email: string;
 };
 
+type Page = {
+  id: number;
+  title: string;
+  updated_at: number;
+};
+
 function makeLink(text: string, path: string): HTMLAnchorElement {
   const link = document.createElement("a");
   link.href = path;
@@ -95,6 +101,7 @@ async function renderWorkspace() {
     redirect("/login");
     return;
   }
+  // Log in, user info
   const user: User = await response.json();
   const title = document.createElement("h1");
   title.textContent = "Workspace";
@@ -106,7 +113,42 @@ async function renderWorkspace() {
     await fetch("/api/auth/logout", { method: "POST" });
     navigate("/");
   });
-  app.replaceChildren(title, who, logout);
+  // Pages
+  const pagesResponse = await fetch("/api/pages");
+  const pages: Page[] = await pagesResponse.json();
+  const list = document.createElement("ul");
+  for (const page of pages) {
+    const item = document.createElement("li");
+    item.append(makeLink(page.title, "/page/" + page.id));
+    list.append(item);
+  }
+  const empty = document.createElement("p");
+  empty.textContent = "No pages yet";
+  const create = document.createElement("button");
+  create.textContent = "Create page";
+  create.addEventListener("click", async () => {
+    const response = await fetch("/api/pages", { method: "POST" });
+    const page: Page = await response.json();
+    navigate("/page/" + page.id);
+  })
+  app.replaceChildren(title, who, logout, pages.length > 0 ? list : empty, create);
+}
+
+async function renderPage(pageId: number) {
+  app.replaceChildren("Loading...");
+  const response = await fetch("/api/pages/" + pageId);
+  if (response.status === 401) {
+    redirect("/login");
+    return;
+  }
+  if (response.status === 404) {
+    renderNotFound();
+    return;
+  }
+  const page: Page = await response.json();
+  const title = document.createElement("h1");
+  title.textContent = page.title;
+  app.replaceChildren(makeLink("Back to workspace", "/workspace"), title);
 }
 
 function renderNotFound() {
@@ -122,7 +164,17 @@ const routes: Record<string, () => void> = {
 };
 
 function render() {
-  const view = routes[location.pathname] ?? renderNotFound;
+  const path = location.pathname;
+  if (path.startsWith("/page/")) {
+    const pageId = Number(path.slice("/page/".length));
+    if (Number.isInteger(pageId)) {
+      renderPage(pageId);
+    } else {
+      renderNotFound();
+    }
+    return;
+  }
+  const view = routes[path] ?? renderNotFound;
   view();
 }
 
