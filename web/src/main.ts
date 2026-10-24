@@ -1,3 +1,5 @@
+import { createEditor, newBlock } from "./editor.ts";
+
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 type User = {
@@ -148,7 +150,10 @@ async function renderPage(pageId: number) {
   const page: Page = await response.json();
   const title = document.createElement("h1");
   title.textContent = page.title;
-  app.replaceChildren(makeLink("Back to workspace", "/workspace"), title);
+  title.contentEditable = "true";
+  const blocks = [newBlock("")];
+  const editor = createEditor(blocks);
+  app.replaceChildren(makeLink("Back to workspace", "/workspace"), title, editor);
 }
 
 function renderNotFound() {
