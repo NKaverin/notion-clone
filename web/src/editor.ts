@@ -9,6 +9,7 @@ export function newBlock(text: string): Block {
     return { id: crypto.randomUUID(), type: "paragraph", text };
 }
 
+// Calculate the offset to the caret within an element
 function caretOffset(el: HTMLElement): number {
     const selection = window.getSelection()!;
     const caret = selection.getRangeAt(0);
@@ -18,6 +19,7 @@ function caretOffset(el: HTMLElement): number {
     return before.toString().length;
 }
 
+// Put the caret into offset within an element
 function placeCaret(el: HTMLElement, offset: number) {
     el.focus();
     const range = document.createRange();
@@ -32,6 +34,7 @@ function placeCaret(el: HTMLElement, offset: number) {
     selection.removeAllRanges();
     selection.addRange(range);
 }
+
 
 export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
@@ -57,10 +60,14 @@ export function createEditor(blocks: Block[]): HTMLElement {
                 event.preventDefault();
                 splitBlock(block, el);
             }
+            if (event.key === "Backspace" && joinWithPrevious(block, el)) {
+                event.preventDefault();
+            }
         });
         return el;
     }
 
+    // On Enter: create a new block and put the rest of previous block into new one
     function splitBlock(block: Block, el: HTMLElement) {
         const offset = caretOffset(el);
         const below = newBlock(block.text.slice(offset));
@@ -69,8 +76,29 @@ export function createEditor(blocks: Block[]): HTMLElement {
         blocks.splice(blocks.indexOf(block) + 1, 0, below);
         const belowEl = renderBlock(below);
         el.after(belowEl);
+        // Place the caret at the start of a new block
         placeCaret(belowEl, 0);
         console.table(blocks);
+    }
+
+    // Backspace at the very start of a block: appent to the previous one and remove it
+    // False otherwise
+    function joinWithPrevious(block: Block, el: HTMLElement): boolean {
+        const index = blocks.indexOf(block);
+        const selection = window.getSelection()!;
+        if (index === 0 || !selection.isCollapsed || caretOffset(el) !== 0) {
+            return false;
+        }
+        const above = blocks[index - 1];
+        const aboveEl = el.previousElementSibling as HTMLElement;
+        const joinAt = above.text.length;
+        above.text += block.text;
+        aboveEl.textContent = above.text;
+        blocks.splice(index, 1);
+        el.remove();
+        placeCaret(aboveEl, joinAt);
+        console.table(blocks);
+        return true;
     }
 
     for (const block of blocks) {
