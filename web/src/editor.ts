@@ -78,7 +78,6 @@ export function createEditor(blocks: Block[]): HTMLElement {
         el.after(belowEl);
         // Place the caret at the start of a new block
         placeCaret(belowEl, 0);
-        console.table(blocks);
     }
 
     // Backspace at the very start of a block: appent to the previous one and remove it
@@ -97,7 +96,6 @@ export function createEditor(blocks: Block[]): HTMLElement {
         blocks.splice(index, 1);
         el.remove();
         placeCaret(aboveEl, joinAt);
-        console.table(blocks);
         return true;
     }
 

@@ -153,6 +153,14 @@ async function renderPage(pageId: number) {
   title.contentEditable = "true";
   const blocks = [newBlock("")];
   const editor = createEditor(blocks);
+  // A title is one line, enter moves into the content instead of adding a line
+  title.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      const first = editor.firstElementChild as HTMLElement;
+      first.focus();
+    }
+  });
   app.replaceChildren(makeLink("Back to workspace", "/workspace"), title, editor);
 }
 
