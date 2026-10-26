@@ -1,13 +1,33 @@
+// enums generate JavaScript, union vanish on compile
+export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet";
+
 // A page is an ordered list of blocks
 export type Block = {
     id: string;
-    type: "paragraph";
+    type: BlockType;
     text: string;
 };
 
-export function newBlock(text: string): Block {
-    return { id: crypto.randomUUID(), type: "paragraph", text };
+export function newBlock(text: string, type: BlockType = "paragraph"): Block {
+    return { id: crypto.randomUUID(), type, text };
 }
+
+// The HTML element each block type
+const TAGS: Record<BlockType, string> = {
+    paragraph: "div",
+    h1: "h1",
+    h2: "h2",
+    h3: "h3",
+    bullet: "div",
+};
+
+// Typing one of these at the start turns it into that type
+const SHORTCUTS: [string, BlockType][] = [
+    ["# ", "h1"],
+    ["## ", "h2"],
+    ["### ", "h3"],
+    ["- ", "bullet"],
+];
 
 // Calculate the offset to the caret within an element
 function caretOffset(el: HTMLElement): number {
@@ -40,16 +60,28 @@ export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
 
     function renderBlock(block: Block): HTMLElement {
-        const el = document.createElement("div");
+        const el = document.createElement(TAGS[block.type]);
         el.contentEditable = "true";
         el.dataset.id = block.id;
         el.textContent = block.text;
+        el.style.whiteSpace = "pre-wrap";
         // style for empty div
         el.style.minHeight = "1.5em";
+        if (block.type === "bullet") {
+            el.style.display = "list-item";
+            el.style.marginLeft = "1.5em";
+        } 
 
         el.addEventListener("input", () => {
             block.text = el.textContent ?? "";
-            console.table(blocks);
+            if (block.type === "paragraph") {
+                for (const [prefix, type] of SHORTCUTS) {
+                    if (block.text.startsWith(prefix)) {
+                        changeType(block, el, type, prefix.length);
+                        return;
+                    }
+                }
+            }
         });
         el.addEventListener("keydown", (event) => {
             // eg Japanese
@@ -97,6 +129,16 @@ export function createEditor(blocks: Block[]): HTMLElement {
         el.remove();
         placeCaret(aboveEl, joinAt);
         return true;
+    }
+
+    function changeType(block: Block, el: HTMLElement, type: BlockType, removeChars: number) {
+        const offset = caretOffset(el);
+        block.type = type;
+        block.text = block.text.slice(removeChars);
+        const replacement = renderBlock(block);
+        el.replaceWith(replacement);
+        placeCaret(replacement, Math.max(0, offset - removeChars));
+        console.table(blocks);
     }
 
     for (const block of blocks) {
