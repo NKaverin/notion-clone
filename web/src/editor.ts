@@ -92,6 +92,17 @@ export function createEditor(blocks: Block[]): HTMLElement {
                 event.preventDefault();
                 splitBlock(block, el);
             }
+            // Backspace at the start turns it back to a paragraph
+            if (
+                event.key === "Backspace" &&
+                block.type !== "paragraph" &&
+                window.getSelection()!.isCollapsed &&
+                caretOffset(el) === 0
+            ) {
+                event.preventDefault();
+                changeType(block, el, "paragraph", 0);
+                return;
+            }
             if (event.key === "Backspace" && joinWithPrevious(block, el)) {
                 event.preventDefault();
             }
@@ -101,8 +112,15 @@ export function createEditor(blocks: Block[]): HTMLElement {
 
     // On Enter: create a new block and put the rest of previous block into new one
     function splitBlock(block: Block, el: HTMLElement) {
+        // Enter on an empty bullet ends the list
+        if (block.type === "bullet" && block.text === "") {
+            changeType(block, el, "paragraph", 0);
+            return;
+        }
         const offset = caretOffset(el);
-        const below = newBlock(block.text.slice(offset));
+        // A bullet continues the list
+        const belowType = block.type === "bullet" ? "bullet" : "paragraph";
+        const below = newBlock(block.text.slice(offset), belowType);
         block.text = block.text.slice(0, offset);
         el.textContent = block.text;
         blocks.splice(blocks.indexOf(block) + 1, 0, below);
