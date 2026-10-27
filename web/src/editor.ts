@@ -55,6 +55,23 @@ function placeCaret(el: HTMLElement, offset: number) {
     selection.addRange(range);
 }
 
+// Is the caret on el's first/last line?
+function caretOnEdgeLine(el: HTMLElement, edge: "first" | "last"): boolean {
+    const selection = window.getSelection()!;
+    if (!selection.isCollapsed) {
+        return false;
+    }
+    const caret = selection.getRangeAt(0).getBoundingClientRect();
+    // an empty block = no box
+    if (caret.height === 0) {
+        return true;
+    }
+    const box = el.getBoundingClientRect();
+    if (edge === "first") {
+        return caret.top - box.top < caret.height / 2;
+    }
+    return box.bottom - caret.bottom < caret.height / 2;
+}
 
 export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
@@ -102,6 +119,21 @@ export function createEditor(blocks: Block[]): HTMLElement {
                 event.preventDefault();
                 changeType(block, el, "paragraph", 0);
                 return;
+            }
+            // Arrows navigation
+            if (event.key === "ArrowUp" && caretOnEdgeLine(el, "first")) {
+                const above = el.previousElementSibling as HTMLElement | null;
+                if (above !== null) {
+                    event.preventDefault();
+                    placeCaret(above, above.textContent!.length);
+                }
+            }
+            if (event.key === "ArrowDown" && caretOnEdgeLine(el, "last")) {
+                const below = el.nextElementSibling as HTMLElement | null;
+                if (below !== null) {
+                    event.preventDefault();
+                    placeCaret(below, 0);
+                }
             }
             if (event.key === "Backspace" && joinWithPrevious(block, el)) {
                 event.preventDefault();
@@ -156,7 +188,6 @@ export function createEditor(blocks: Block[]): HTMLElement {
         const replacement = renderBlock(block);
         el.replaceWith(replacement);
         placeCaret(replacement, Math.max(0, offset - removeChars));
-        console.table(blocks);
     }
 
     for (const block of blocks) {
