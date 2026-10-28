@@ -1,4 +1,4 @@
-import { normalize, plainText, span, splitSpans, type Span } from "./spans";
+import { normalize, plainText, span, splitSpans, toggleMark, type Span } from "./spans";
 
 // enums generate JavaScript, union vanish on compile
 export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet";
@@ -122,6 +122,28 @@ function readSpans(el: Node, bold = false, italic = false): Span[] {
     return spans;
 }
 
+// The selection as character offsets
+function selectionOffsets(el: HTMLElement) : [number, number] {
+    const range = window.getSelection()!.getRangeAt(0);
+    const before = document.createRange();
+    before.selectNodeContents(el);
+    before.setEnd(range.startContainer, range.startOffset);
+    const start = before.toString().length;
+    return [start, start + range.toString().length];
+}
+
+// Select chars within el
+function selectRange(el: HTMLElement, start: number, end: number) {
+    const range = document.createRange();
+    const [startNode, startOffset] = domPoint(el, start);
+    const [endNode, endOffset] = domPoint(el, end);
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
 export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
 
@@ -140,7 +162,6 @@ export function createEditor(blocks: Block[]): HTMLElement {
 
         el.addEventListener("input", () => {
             block.spans = normalize(readSpans(el));
-            console.log("spans", block.spans);
             if (block.type === "paragraph") {
                 for (const [prefix, type] of SHORTCUTS) {
                     if (plainText(block.spans).startsWith(prefix)) {
@@ -158,6 +179,18 @@ export function createEditor(blocks: Block[]): HTMLElement {
             if (event.key === "Enter") {
                 event.preventDefault();
                 splitBlock(block, el);
+            }
+            // CTRL+B / Ctrl+I or cmd
+            const key = event.key.toLocaleLowerCase();
+            if ((event.ctrlKey || event.metaKey) && (key === "b" || key === "i")) {
+                event.preventDefault();
+                const [start, end] = selectionOffsets(el);
+                if (start === end) {
+                    return;
+                }
+                block.spans = toggleMark(block.spans, start, end, key === "b" ? "bold" : "italic");
+                renderSpans(el, block.spans);
+                selectRange(el, start, end);
             }
             // Backspace at the start turns it back to a paragraph
             if (
