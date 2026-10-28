@@ -1,3 +1,5 @@
+import { normalize, plainText, span, splitSpans, type Span } from "./spans";
+
 // enums generate JavaScript, union vanish on compile
 export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet";
 
@@ -5,11 +7,11 @@ export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet";
 export type Block = {
     id: string;
     type: BlockType;
-    text: string;
+    spans:  Span[];
 };
 
 export function newBlock(text: string, type: BlockType = "paragraph"): Block {
-    return { id: crypto.randomUUID(), type, text };
+    return { id: crypto.randomUUID(), type, spans: text === "" ? [] : [span(text)]  };
 }
 
 // The HTML element each block type
@@ -39,16 +41,28 @@ function caretOffset(el: HTMLElement): number {
     return before.toString().length;
 }
 
+function domPoint(el: HTMLElement, offset: number) : [Node, number] {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let remaining = offset;
+    let last: Node | null = null;
+    for (let node = walker.nextNode(); node !== null; node= walker.nextNode()) {
+        const length = node.textContent!.length;
+        if (remaining <= length) {
+            return [node, remaining];
+        }
+        remaining -= length;
+        last = node;
+    }
+    // Past the end or no text
+    return last === null ? [el, 0] : [last, last.textContent!.length];
+}
+
 // Put the caret into offset within an element
 function placeCaret(el: HTMLElement, offset: number) {
     el.focus();
     const range = document.createRange();
-    const text = el.firstChild;
-    if (text === null || text.nodeType !== Node.TEXT_NODE) {
-        range.setStart(el, 0);
-    } else {
-        range.setStart(text, Math.min(offset, text.textContent!.length));
-    }
+    const [node, nodeOffset] = domPoint(el, offset);
+    range.setStart(node, nodeOffset);
     range.collapse(true);
     const selection = window.getSelection()!;
     selection.removeAllRanges();
@@ -73,6 +87,41 @@ function caretOnEdgeLine(el: HTMLElement, edge: "first" | "last"): boolean {
     return box.bottom - caret.bottom < caret.height / 2;
 }
 
+// Draw spans into el
+function renderSpans(el: HTMLElement, spans: Span[]) {
+    const nodes = spans.map((s) => {
+        let node: Node = document.createTextNode(s.text);
+        if (s.italic) {
+            const em = document.createElement("em");
+            em.append(node);
+            node = em;
+        }
+        if (s.bold) {
+            const strong = document.createElement("strong");
+            strong.append(node);
+            node = strong;
+        }
+        return node;
+    });
+    el.replaceChildren(...nodes);
+}
+
+// Read whatever DOM has, accepts what the browser may produce
+function readSpans(el: Node, bold = false, italic = false): Span[] {
+    const spans: Span[] = [];
+    for (const child of el.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+            spans.push(span(child.textContent ?? "", bold, italic));
+        } else if (child instanceof HTMLElement) {
+            const tag = child.tagName;
+            const childBold = bold || tag === "STRONG" || tag == "B";
+            const childItalic = italic || tag === "EM" || tag === "I";
+            spans.push(...readSpans(child, childBold, childItalic));
+        }
+    }
+    return spans;
+}
+
 export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
 
@@ -80,7 +129,7 @@ export function createEditor(blocks: Block[]): HTMLElement {
         const el = document.createElement(TAGS[block.type]);
         el.contentEditable = "true";
         el.dataset.id = block.id;
-        el.textContent = block.text;
+        renderSpans(el, block.spans);
         el.style.whiteSpace = "pre-wrap";
         // style for empty div
         el.style.minHeight = "1.5em";
@@ -90,10 +139,11 @@ export function createEditor(blocks: Block[]): HTMLElement {
         } 
 
         el.addEventListener("input", () => {
-            block.text = el.textContent ?? "";
+            block.spans = normalize(readSpans(el));
+            console.log("spans", block.spans);
             if (block.type === "paragraph") {
                 for (const [prefix, type] of SHORTCUTS) {
-                    if (block.text.startsWith(prefix)) {
+                    if (plainText(block.spans).startsWith(prefix)) {
                         changeType(block, el, type, prefix.length);
                         return;
                     }
@@ -145,16 +195,18 @@ export function createEditor(blocks: Block[]): HTMLElement {
     // On Enter: create a new block and put the rest of previous block into new one
     function splitBlock(block: Block, el: HTMLElement) {
         // Enter on an empty bullet ends the list
-        if (block.type === "bullet" && block.text === "") {
+        if (block.type === "bullet" && plainText(block.spans) === "") {
             changeType(block, el, "paragraph", 0);
             return;
         }
         const offset = caretOffset(el);
         // A bullet continues the list
         const belowType = block.type === "bullet" ? "bullet" : "paragraph";
-        const below = newBlock(block.text.slice(offset), belowType);
-        block.text = block.text.slice(0, offset);
-        el.textContent = block.text;
+        const [before, after] = splitSpans(block.spans, offset);
+        const below = newBlock("", belowType);
+        below.spans = after;
+        block.spans = before;
+        renderSpans(el, block.spans);        
         blocks.splice(blocks.indexOf(block) + 1, 0, below);
         const belowEl = renderBlock(below);
         el.after(belowEl);
@@ -172,9 +224,9 @@ export function createEditor(blocks: Block[]): HTMLElement {
         }
         const above = blocks[index - 1];
         const aboveEl = el.previousElementSibling as HTMLElement;
-        const joinAt = above.text.length;
-        above.text += block.text;
-        aboveEl.textContent = above.text;
+        const joinAt = plainText(above.spans).length;
+        above.spans = normalize([...above.spans, ...block.spans]);
+        renderSpans(aboveEl, above.spans);
         blocks.splice(index, 1);
         el.remove();
         placeCaret(aboveEl, joinAt);
@@ -184,7 +236,7 @@ export function createEditor(blocks: Block[]): HTMLElement {
     function changeType(block: Block, el: HTMLElement, type: BlockType, removeChars: number) {
         const offset = caretOffset(el);
         block.type = type;
-        block.text = block.text.slice(removeChars);
+        block.spans = splitSpans(block.spans, removeChars)[1];
         const replacement = renderBlock(block);
         el.replaceWith(replacement);
         placeCaret(replacement, Math.max(0, offset - removeChars));
