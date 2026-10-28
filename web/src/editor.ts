@@ -117,7 +117,7 @@ function readSpans(el: Node, bold = false, italic = false): Span[] {
             spans.push(span(child.textContent ?? "", bold, italic));
         } else if (child instanceof HTMLElement) {
             const tag = child.tagName;
-            const childBold = bold || tag === "STRONG" || tag == "B";
+            const childBold = bold || tag === "STRONG" || tag === "B";
             const childItalic = italic || tag === "EM" || tag === "I";
             spans.push(...readSpans(child, childBold, childItalic));
         }
@@ -189,8 +189,16 @@ export function createEditor(blocks: Block[]): HTMLElement {
                 block.spans = insertText(block.spans, start, end, "\n");
                 renderSpans(el, block.spans);
                 placeCaret(el, start + 1);
-                console.log("spans", block.spans);
             }
+        });
+        // Paste only the plain text
+        el.addEventListener("paste", (event) => {
+            event.preventDefault();
+            const text = event.clipboardData!.getData("text/plain").replaceAll("\r\n", "\n");
+            const [start, end] = selectionOffsets(el);
+            block.spans = insertText(block.spans, start, end, text);
+            renderSpans(el, block.spans);
+            placeCaret(el, start + text.length);
         });
         el.addEventListener("keydown", (event) => {
             // eg Japanese
@@ -202,7 +210,7 @@ export function createEditor(blocks: Block[]): HTMLElement {
                 splitBlock(block, el);
             }
             // CTRL+B / Ctrl+I or cmd
-            const key = event.key.toLocaleLowerCase();
+            const key = event.key.toLowerCase();
             if ((event.ctrlKey || event.metaKey) && (key === "b" || key === "i")) {
                 event.preventDefault();
                 const [start, end] = selectionOffsets(el);
