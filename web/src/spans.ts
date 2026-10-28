@@ -58,3 +58,12 @@ export function toggleMark(spans: Span[], from: number, to: number, mark: "bold"
     const changed = middle.map((s) => ({ ...s, [mark]: turnOn}));
     return normalize([...before, ...changed, ...after]);
 }
+
+// New text takes the formatting of the character before it, as typed text
+export function insertText(spans: Span[], from: number, to: number, text: string): Span[] {
+    const [before, rest] = splitSpans(spans, from);
+    const after = splitSpans(rest, to - from)[1];
+    const previous = before[before.length - 1];
+    const inserted = span(text, previous?.bold ?? false, previous?.italic ?? false);
+    return normalize([...before, inserted, ...after]);
+}

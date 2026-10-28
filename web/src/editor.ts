@@ -1,4 +1,4 @@
-import { normalize, plainText, span, splitSpans, toggleMark, type Span } from "./spans";
+import { insertText, normalize, plainText, span, splitSpans, toggleMark, type Span } from "./spans";
 
 // enums generate JavaScript, union vanish on compile
 export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet";
@@ -103,6 +103,9 @@ function renderSpans(el: HTMLElement, spans: Span[]) {
         }
         return node;
     });
+    if (plainText(spans).endsWith("\n")) {
+        nodes.push(document.createElement("br"));
+    }
     el.replaceChildren(...nodes);
 }
 
@@ -179,12 +182,22 @@ export function createEditor(blocks: Block[]): HTMLElement {
         el.addEventListener("compositionend", () => {
             redraw(block, el);
         });
+        el.addEventListener("beforeinput", (event) => {
+            if (event.inputType === "insertLineBreak") {
+                event.preventDefault();
+                const [start, end] = selectionOffsets(el);
+                block.spans = insertText(block.spans, start, end, "\n");
+                renderSpans(el, block.spans);
+                placeCaret(el, start + 1);
+                console.log("spans", block.spans);
+            }
+        });
         el.addEventListener("keydown", (event) => {
             // eg Japanese
             if (event.isComposing) {
                 return;
             }
-            if (event.key === "Enter") {
+            if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 splitBlock(block, el);
             }
