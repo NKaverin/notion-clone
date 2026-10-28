@@ -160,7 +160,7 @@ export function createEditor(blocks: Block[]): HTMLElement {
             el.style.marginLeft = "1.5em";
         } 
 
-        el.addEventListener("input", () => {
+        el.addEventListener("input", (event) => {
             block.spans = normalize(readSpans(el));
             if (block.type === "paragraph") {
                 for (const [prefix, type] of SHORTCUTS) {
@@ -170,6 +170,14 @@ export function createEditor(blocks: Block[]): HTMLElement {
                     }
                 }
             }
+            // Do not redraw if IME composition
+            if ((event as InputEvent).isComposing) {
+                return;
+            }
+            redraw(block, el);
+        });
+        el.addEventListener("compositionend", () => {
+            redraw(block, el);
         });
         el.addEventListener("keydown", (event) => {
             // eg Japanese
@@ -264,6 +272,12 @@ export function createEditor(blocks: Block[]): HTMLElement {
         el.remove();
         placeCaret(aboveEl, joinAt);
         return true;
+    }
+
+    function redraw(block: Block, el: HTMLElement) {
+        const offset = caretOffset(el);
+        renderSpans(el, block.spans);
+        placeCaret(el, offset);
     }
 
     function changeType(block: Block, el: HTMLElement, type: BlockType, removeChars: number) {
