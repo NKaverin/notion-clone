@@ -1,7 +1,9 @@
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { insertText, normalize, plainText, span, splitSpans, toggleMark, type Span } from "./spans";
 
 // enums generate JavaScript, union vanish on compile
-export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet";
+export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet" | "equation";
 
 // A page is an ordered list of blocks
 export type Block = {
@@ -21,6 +23,7 @@ const TAGS: Record<BlockType, string> = {
     h2: "h2",
     h3: "h3",
     bullet: "div",
+    equation: "div",
 };
 
 // Typing one of these at the start turns it into that type
@@ -29,6 +32,7 @@ const SHORTCUTS: [string, BlockType][] = [
     ["## ", "h2"],
     ["### ", "h3"],
     ["- ", "bullet"],
+    ["$$", "equation"],
 ];
 
 // Calculate the offset to the caret within an element
@@ -150,7 +154,27 @@ function selectRange(el: HTMLElement, start: number, end: number) {
 export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
 
+    // An equation block is never contenteditable
+    function renderEquation(block: Block): HTMLElement {
+        const el = document.createElement(TAGS.equation);
+        el.dataset.id = block.id;
+        el.style.minHeight = "1.5em";
+        el.style.cursor = "pointer";
+        const source = plainText(block.spans);
+        if (source === "") {
+            el.textContent = "Empty equation";
+            el.style.color = "gray";
+        } else {
+            // bad Latex in red instead of throwing
+            katex.render(source, el, { displayMode: true, throwOnError: false});
+        }
+        return el;
+    }
+
     function renderBlock(block: Block): HTMLElement {
+        if (block.type === "equation") {
+            return renderEquation(block);
+        }
         const el = document.createElement(TAGS[block.type]);
         el.contentEditable = "true";
         el.dataset.id = block.id;
