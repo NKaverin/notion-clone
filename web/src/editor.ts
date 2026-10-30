@@ -168,7 +168,32 @@ export function createEditor(blocks: Block[]): HTMLElement {
             // bad Latex in red instead of throwing
             katex.render(source, el, { displayMode: true, throwOnError: false});
         }
+        el.addEventListener("click", () => editEquation(block, el));
         return el;
+    }
+
+    function editEquation(block: Block, el: HTMLElement) {
+        const input = document.createElement("textarea");
+        input.dataset.id = block.id;
+        input.value = plainText(block.spans);
+        input.style.width = "100%";
+        // not sure about monospace
+        input.style.fontFamily = "monospace";
+        input.addEventListener("keydown", (event) => {
+            // Enter or Escape finishes, shift+Enter = new line
+            const enter = event.key === "Enter" && !event.shiftKey && !event.isComposing;
+            if (enter || event.key === "Escape") {
+                event.preventDefault();
+                input.blur();
+            }
+        });
+        input.addEventListener("blur", () => {
+            block.spans = input.value === "" ? [] : [span(input.value)];
+            console.log("equation source", plainText(block.spans));
+            input.replaceWith(renderEquation(block));
+        });
+        el.replaceWith(input);
+        input.focus();
     }
 
     function renderBlock(block: Block): HTMLElement {
@@ -331,6 +356,11 @@ export function createEditor(blocks: Block[]): HTMLElement {
         block.spans = splitSpans(block.spans, removeChars)[1];
         const replacement = renderBlock(block);
         el.replaceWith(replacement);
+        // It is not editable, we do not need caret
+        if (type === "equation") {
+            editEquation(block, replacement);
+            return;
+        }
         placeCaret(replacement, Math.max(0, offset - removeChars));
     }
 
