@@ -153,7 +153,28 @@ function selectRange(el: HTMLElement, start: number, end: number) {
 
 export function createEditor(blocks: Block[]): HTMLElement {
     const container = document.createElement("div");
-
+    // Put the caret into a block, an equation has no caret
+    function focusBlock(el: HTMLElement, offset: number) {
+        const block = blocks.find((b) => b.id === el.dataset.id)!;
+        if (block.type === "equation") {
+            editEquation(block, el);
+            return;
+        }
+        placeCaret(el, offset);
+    }
+    // After finishing an equation - move below
+    function moveBelow(block: Block, el: HTMLElement) {
+        const next = el.nextElementSibling as HTMLElement | null;
+        if (next !== null) {
+            focusBlock(next, 0);
+            return;
+        }
+        const below = newBlock("");
+        blocks.splice(blocks.indexOf(block) + 1, 0, below);
+        const belowEl = renderBlock(below);
+        el.after(belowEl);
+        placeCaret(belowEl, 0);
+    }
     // An equation block is never contenteditable
     function renderEquation(block: Block): HTMLElement {
         const el = document.createElement(TAGS.equation);
@@ -179,18 +200,23 @@ export function createEditor(blocks: Block[]): HTMLElement {
         input.style.width = "100%";
         // not sure about monospace
         input.style.fontFamily = "monospace";
+        let continueBelow = false;
         input.addEventListener("keydown", (event) => {
             // Enter or Escape finishes, shift+Enter = new line
             const enter = event.key === "Enter" && !event.shiftKey && !event.isComposing;
             if (enter || event.key === "Escape") {
                 event.preventDefault();
+                continueBelow = enter;
                 input.blur();
             }
         });
         input.addEventListener("blur", () => {
             block.spans = input.value === "" ? [] : [span(input.value)];
-            console.log("equation source", plainText(block.spans));
-            input.replaceWith(renderEquation(block));
+            const rendered = renderEquation(block);
+            input.replaceWith(rendered);
+            if (continueBelow) {
+                moveBelow(block, rendered);
+            }
         });
         el.replaceWith(input);
         input.focus();
@@ -286,14 +312,14 @@ export function createEditor(blocks: Block[]): HTMLElement {
                 const above = el.previousElementSibling as HTMLElement | null;
                 if (above !== null) {
                     event.preventDefault();
-                    placeCaret(above, above.textContent!.length);
+                    focusBlock(above, above.textContent!.length);
                 }
             }
             if (event.key === "ArrowDown" && caretOnEdgeLine(el, "last")) {
                 const below = el.nextElementSibling as HTMLElement | null;
                 if (below !== null) {
                     event.preventDefault();
-                    placeCaret(below, 0);
+                    focusBlock(below, 0);
                 }
             }
             if (event.key === "Backspace" && joinWithPrevious(block, el)) {
