@@ -32,7 +32,7 @@ const SHORTCUTS: [string, BlockType][] = [
     ["## ", "h2"],
     ["### ", "h3"],
     ["- ", "bullet"],
-    ["$$", "equation"],
+    ["$$ ", "equation"],
 ];
 
 // Calculate the offset to the caret within an element
@@ -360,6 +360,9 @@ export function createEditor(blocks: Block[]): HTMLElement {
             return false;
         }
         const above = blocks[index - 1];
+        if (above.type === "equation") {
+            return false;
+        }
         const aboveEl = el.previousElementSibling as HTMLElement;
         const joinAt = plainText(above.spans).length;
         above.spans = normalize([...above.spans, ...block.spans]);
