@@ -1,6 +1,6 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import { insertText, normalize, plainText, span, splitSpans, toggleMark, type Span } from "./spans";
+import { ATOM, insertMath, insertText, normalize, plainText, span, splitSpans, toggleMark, type Span } from "./spans";
 
 // enums generate JavaScript, union vanish on compile
 export type BlockType = "paragraph" | "h1" | "h2" | "h3" | "bullet" | "equation";
@@ -35,6 +35,14 @@ const SHORTCUTS: [string, BlockType][] = [
     ["$$ ", "equation"],
 ];
 
+// Characters in a range, counting each inline equation as one
+function rangeLength(range: Range): number {
+    const fragment = range.cloneContents();
+    for (const atom of fragment.querySelectorAll("[data-math]")) {
+        atom.replaceWith(ATOM);
+    }
+    return fragment.textContent!.length;
+}
 // Calculate the offset to the caret within an element
 function caretOffset(el: HTMLElement): number {
     const selection = window.getSelection()!;
@@ -42,23 +50,40 @@ function caretOffset(el: HTMLElement): number {
     const before = document.createRange();
     before.selectNodeContents(el);
     before.setEnd(caret.startContainer, caret.startOffset);
-    return before.toString().length;
+    return rangeLength(before);
 }
 
 function domPoint(el: HTMLElement, offset: number) : [Node, number] {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let remaining = offset;
-    let last: Node | null = null;
-    for (let node = walker.nextNode(); node !== null; node= walker.nextNode()) {
-        const length = node.textContent!.length;
-        if (remaining <= length) {
-            return [node, remaining];
+    let last: [Node, number] = [el, 0];
+    // Depth-first walk
+    function walk(node: Node): [Node, number] | null {
+        const children = [...node.childNodes];
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            if (child.nodeType === Node.TEXT_NODE) {
+                const length = child.textContent!.length;
+                if (remaining <= length) {
+                    return [child, remaining];
+                }
+                remaining -= length;
+                last = [child, length];
+            } else if (child instanceof HTMLElement && child.dataset.math !== undefined) {
+                if (remaining ===0) {
+                    return [node, i];
+                }
+                remaining -= 1;
+                last = [node, i + 1];
+            } else {
+                const found = walk(child);
+                if (found !== null) {
+                    return found;
+                }
+            }
         }
-        remaining -= length;
-        last = node;
+        return null;
     }
-    // Past the end or no text
-    return last === null ? [el, 0] : [last, last.textContent!.length];
+    return walk(el) ?? last;
 }
 
 // Put the caret into offset within an element
@@ -94,6 +119,13 @@ function caretOnEdgeLine(el: HTMLElement, edge: "first" | "last"): boolean {
 // Draw spans into el
 function renderSpans(el: HTMLElement, spans: Span[]) {
     const nodes = spans.map((s) => {
+        if (s.math !== undefined) {
+            const atom = document.createElement("span");
+            atom.contentEditable = "false";
+            atom.dataset.math = s.math;
+            katex.render(s.math, atom, { throwOnError: false });
+            return atom;
+        }
         let node: Node = document.createTextNode(s.text);
         if (s.italic) {
             const em = document.createElement("em");
@@ -119,6 +151,8 @@ function readSpans(el: Node, bold = false, italic = false): Span[] {
     for (const child of el.childNodes) {
         if (child.nodeType === Node.TEXT_NODE) {
             spans.push(span(child.textContent ?? "", bold, italic));
+        } else if (child instanceof HTMLElement && child.dataset.math !== undefined) {
+            spans.push({ text: ATOM, bold, italic, math: child.dataset.math });
         } else if (child instanceof HTMLElement) {
             const tag = child.tagName;
             const childBold = bold || tag === "STRONG" || tag === "B";
@@ -135,8 +169,8 @@ function selectionOffsets(el: HTMLElement) : [number, number] {
     const before = document.createRange();
     before.selectNodeContents(el);
     before.setEnd(range.startContainer, range.startOffset);
-    const start = before.toString().length;
-    return [start, start + range.toString().length];
+    const start = rangeLength(before);
+    return [start, start + rangeLength(range)];
 }
 
 // Select chars within el
@@ -250,6 +284,9 @@ export function createEditor(blocks: Block[]): HTMLElement {
             }
             // Do not redraw if IME composition
             if ((event as InputEvent).isComposing) {
+                return;
+            }
+            if (convertInlineMath(block, el)) {
                 return;
             }
             redraw(block, el);
@@ -370,6 +407,20 @@ export function createEditor(blocks: Block[]): HTMLElement {
         blocks.splice(index, 1);
         el.remove();
         placeCaret(aboveEl, joinAt);
+        return true;
+    }
+    // Inline math is inbetween $
+    function convertInlineMath(block: Block, el: HTMLElement): boolean {
+        const offset = caretOffset(el);
+        const before = plainText(block.spans).slice(0, offset);
+        const match = before.match(/\$([^\s$](?:[^$\n]*[^\s$])?)\$$/);
+        if (match === null) {
+            return false;
+        }
+        const start = offset - match[0].length;
+        block.spans = insertMath(block.spans, start, offset, match[1]);
+        renderSpans(el, block.spans);
+        placeCaret(el, start + 1);
         return true;
     }
 

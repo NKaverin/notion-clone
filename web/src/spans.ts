@@ -3,7 +3,15 @@ export type Span = {
     text: string;
     bold: boolean;
     italic: boolean;
+    math?: string; // for inline equations
 };
+
+// Object replacement character
+export const ATOM = "uFFFC";
+
+export function mathSpan(latex: string): Span {
+    return { text: ATOM, bold: false, italic: false, math: latex };
+}
 
 export function span(text: string, bold = false, italic = false): Span {
     return { text, bold, italic };
@@ -21,7 +29,9 @@ export function normalize(spans: Span[]) : Span[] {
             continue;
         }
         const last = result[result.length - 1];
-        if (last !== undefined && last.bold === s.bold && last.italic === s.italic) {
+        // Equations never merge
+        const mergeable = last !== undefined && last.math === undefined && s.math === undefined;
+        if (mergeable && last.bold === s.bold && last.italic === s.italic) {
             last.text += s.text;
         } else {
             result.push({ ...s });
@@ -66,4 +76,10 @@ export function insertText(spans: Span[], from: number, to: number, text: string
     const previous = before[before.length - 1];
     const inserted = span(text, previous?.bold ?? false, previous?.italic ?? false);
     return normalize([...before, inserted, ...after]);
+}
+
+export function insertMath(spans: Span[], from: number, to: number, latex: string): Span[] {
+    const [before, rest] = splitSpans(spans, from);
+    const after = splitSpans(rest, to - from)[1];
+    return normalize([...before, mathSpan(latex), ...after]);
 }
