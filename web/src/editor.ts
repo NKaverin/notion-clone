@@ -272,6 +272,22 @@ export function createEditor(blocks: Block[]): HTMLElement {
             el.style.marginLeft = "1.5em";
         } 
 
+        // Inline equation click
+        el.addEventListener("click", (event) => {
+            const atom = (event.target as Element).closest<HTMLElement>("[data-math]");
+            if (atom === null) {
+                return;
+            }
+            const before = document.createRange();
+            before.selectNodeContents(el);
+            before.setEndBefore(atom);
+            const offset = rangeLength(before);
+            const source = "$" + atom.dataset.math!;
+            block.spans = insertText(block.spans, offset, offset + 1, source);
+            renderSpans(el, block.spans);
+            placeCaret(el, offset + source.length);
+        });
+        
         el.addEventListener("input", (event) => {
             block.spans = normalize(readSpans(el));
             if (block.type === "paragraph") {
