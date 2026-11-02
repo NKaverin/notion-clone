@@ -1,10 +1,12 @@
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager
+from typing import Literal
 from pathlib import Path
 
 
@@ -19,6 +21,22 @@ SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 class CodeRequest(BaseModel):
     email: EmailStr
+
+# Mirror Span and Block in the web app
+class SpanModel(BaseModel):
+    text: str
+    bold: bool
+    italic: bool
+    math: str | None = None
+
+class BlockModel(BaseModel):
+    id: str
+    type: Literal["paragraph", "h1", "h2", "h3", "bullet", "equation"]
+    spans: list[SpanModel]
+
+class PageUpdate(BaseModel):
+    title: str
+    blocks: list[BlockModel]
 
 class CodeVerify(BaseModel):
     email: EmailStr
@@ -71,6 +89,10 @@ def init_db():
             updated_at INTEGER NOT NULL
         )
     """)
+    # Migration
+    columns = [row["name"] for row in db.execute("PRAGMA table_info(pages)")]
+    if "content" not in columns:
+        db.execute("ALTER TABLE pages ADD COLUMN content TEXT NOT NULL DEFAULT '[]'")
     db.commit()
     db.close()
 
@@ -219,7 +241,7 @@ def get_page(page_id: int, user: dict = Depends(current_user)):
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, title, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
+            "SELECT id, title, content, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
             (page_id, user["id"]),
         ).fetchone()
     finally:
@@ -227,4 +249,24 @@ def get_page(page_id: int, user: dict = Depends(current_user)):
     # If owned by someone else, gets the same 404
     if row is None:
         raise HTTPException(status_code=404, detail="Page not found")
-    return dict(row)
+    page = dict(row)
+    page["blocks"] = json.loads(page.pop("content"))
+    return page
+
+@app.put("/api/pages/{page_id}")
+def update_page(page_id: int, body: PageUpdate, user: dict = Depends(current_user)):
+    # A span without math is stored without "math" key
+    content = json.dumps(body.model_dump(exclude_none=True)["blocks"])
+    now = int(time.time())
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "UPDATE pages SET title = ?, content = ?, updated_at = ? WHERE id = ? AND owner_id = ?",
+            (body.title, content, now, page_id, user["id"]),
+        )
+        db.commit()
+    finally:
+        db.close()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return {"updated_at": now}
