@@ -255,7 +255,7 @@ def get_page(page_id: int, user: dict = Depends(current_user)):
 
 @app.put("/api/pages/{page_id}")
 def update_page(page_id: int, body: PageUpdate, user: dict = Depends(current_user)):
-    # A span without math is stored without "math" key
+    # math: null !== undefined 
     content = json.dumps(body.model_dump(exclude_none=True)["blocks"])
     now = int(time.time())
     db = get_db()

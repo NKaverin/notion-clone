@@ -1,4 +1,4 @@
-import { createEditor, newBlock } from "./editor.ts";
+import { createEditor, newBlock, type Block } from "./editor.ts";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -11,6 +11,10 @@ type Page = {
   id: number;
   title: string;
   updated_at: number;
+};
+
+type PageWithBlocks = Page & {
+  blocks: Block[];
 };
 
 function makeLink(text: string, path: string): HTMLAnchorElement {
@@ -130,7 +134,7 @@ async function renderWorkspace() {
   create.textContent = "Create page";
   create.addEventListener("click", async () => {
     const response = await fetch("/api/pages", { method: "POST" });
-    const page: Page = await response.json();
+    const page: PageWithBlocks = await response.json();
     navigate("/page/" + page.id);
   })
   app.replaceChildren(title, who, logout, pages.length > 0 ? list : empty, create);
@@ -147,12 +151,39 @@ async function renderPage(pageId: number) {
     renderNotFound();
     return;
   }
-  const page: Page = await response.json();
+  const page: PageWithBlocks = await response.json();
   const title = document.createElement("h1");
   title.textContent = page.title;
   title.contentEditable = "true";
-  const blocks = [newBlock("")];
+  // New page has no blocks, one empty paragraph
+  const blocks = page.blocks.length > 0 ? page.blocks : [newBlock("")];
   const editor = createEditor(blocks);
+  const status = document.createElement("p");
+  status.textContent = "Saved";
+
+  async function save() {
+    status.textContent = "Saving...";
+    const response = await fetch("/api/pages/" + pageId, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title.textContent, blocks}),
+    });
+    status.textContent = response.ok ? "Saved" : "Save failed: " + response.status;
+  }
+
+  // Every edit change restarts a 500 ms timer
+  let timer: number | undefined;
+  function scheduleSave() {
+    status.textContent = "Unsaved changes";
+    clearTimeout(timer);
+    timer = setTimeout(save, 500);
+  } 
+  // Every edit = DOM changing (except inside an equation, save happens on blur)
+  const observer = new MutationObserver(scheduleSave);
+  const watch = { childList: true, characterData: true, subtree: true};
+  observer.observe(editor, watch);
+  observer.observe(title, watch);
+
   // A title is one line, enter moves into the content instead of adding a line
   title.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.isComposing) {
@@ -161,7 +192,7 @@ async function renderPage(pageId: number) {
       first.focus();
     }
   });
-  app.replaceChildren(makeLink("Back to workspace", "/workspace"), title, editor);
+  app.replaceChildren(makeLink("Back to workspace", "/workspace"), status, title, editor);
 }
 
 function renderNotFound() {
