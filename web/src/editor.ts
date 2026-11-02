@@ -123,6 +123,7 @@ function renderSpans(el: HTMLElement, spans: Span[]) {
             const atom = document.createElement("span");
             atom.contentEditable = "false";
             atom.dataset.math = s.math;
+            atom.style.cursor = "pointer";
             katex.render(s.math, atom, { throwOnError: false });
             return atom;
         }
@@ -282,7 +283,7 @@ export function createEditor(blocks: Block[]): HTMLElement {
             before.selectNodeContents(el);
             before.setEndBefore(atom);
             const offset = rangeLength(before);
-            const source = "$" + atom.dataset.math!;
+            const source = "$$" + atom.dataset.math!;
             block.spans = insertText(block.spans, offset, offset + 1, source);
             renderSpans(el, block.spans);
             placeCaret(el, offset + source.length);
@@ -429,7 +430,7 @@ export function createEditor(blocks: Block[]): HTMLElement {
     function convertInlineMath(block: Block, el: HTMLElement): boolean {
         const offset = caretOffset(el);
         const before = plainText(block.spans).slice(0, offset);
-        const match = before.match(/\$([^\s$](?:[^$\n]*[^\s$])?)\$$/);
+        const match = before.match(/\$\$([^\s$](?:[^$\n]*[^\s$])?)\$\$$/);
         if (match === null) {
             return false;
         }

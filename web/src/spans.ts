@@ -7,7 +7,7 @@ export type Span = {
 };
 
 // Object replacement character
-export const ATOM = "uFFFC";
+export const ATOM = "\uFFFC";
 
 export function mathSpan(latex: string): Span {
     return { text: ATOM, bold: false, italic: false, math: latex };
