@@ -1,4 +1,5 @@
 import { createEditor, newBlock, type Block } from "./editor.ts";
+import "./style.css"
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -99,50 +100,72 @@ function renderCodeForm(email: string) {
   app.replaceChildren(title, hint, form, message, makeLink("Start again", "/login"));
 }
 
-async function renderWorkspace() {
-  app.replaceChildren("Loading...");
-  // Check cookie
-  const response = await fetch("/api/me");
-  if (response.status === 401) {
-    redirect("/login");
-    return;
-  }
-  // Log in, user info
-  const user: User = await response.json();
-  const title = document.createElement("h1");
-  title.textContent = "Workspace";
+function buildSidebar(user: User, pages: Page[], currentId: number | null) : HTMLElement {
+  const sidebar = document.createElement("nav");
+  sidebar.className = "sidebar";
   const who = document.createElement("p");
-  who.textContent = "Logged in as " + user.email;
+  who.textContent = user.email;
+  const list = document.createElement("ul");
+  for (const page of pages) {
+    const item = document.createElement("li");
+    const link = makeLink(page.title || "Untitled", "/page/" + page.id);
+    link.dataset.pageId = String(page.id);
+    if (page.id === currentId) {
+      link.setAttribute("aria-current", "page");
+    }
+    item.append(link);
+    list.append(item);
+  }
+  const create = document.createElement("button");
+  create.textContent = "New page";
+  create.addEventListener("click", async () => {
+    const response = await fetch("/api/pages", { method: "POST" });
+    const page: Page = await response.json();
+    navigate("/page/" + page.id);
+  });
   const logout = document.createElement("button");
   logout.textContent = "Log out";
   logout.addEventListener("click", async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     navigate("/");
-  });
-  // Pages
-  const pagesResponse = await fetch("/api/pages");
-  const pages: Page[] = await pagesResponse.json();
-  const list = document.createElement("ul");
-  for (const page of pages) {
-    const item = document.createElement("li");
-    item.append(makeLink(page.title, "/page/" + page.id));
-    list.append(item);
-  }
-  const empty = document.createElement("p");
-  empty.textContent = "No pages yet";
-  const create = document.createElement("button");
-  create.textContent = "Create page";
-  create.addEventListener("click", async () => {
-    const response = await fetch("/api/pages", { method: "POST" });
-    const page: PageWithBlocks = await response.json();
-    navigate("/page/" + page.id);
   })
-  app.replaceChildren(title, who, logout, pages.length > 0 ? list : empty, create);
+  sidebar.append(who, list, create, logout);
+  return sidebar;
+}
+
+function showLayout(sidebar: HTMLElement, ...content: (Node | string)[]) {
+  const main = document.createElement("main");
+  main.className = "content";
+  main.append(...content);
+  const layout = document.createElement("div");
+  layout.className = "layout";
+  layout.append(sidebar, main);
+  app.replaceChildren(layout);
+}
+
+async function renderWorkspace() {
+  app.replaceChildren("Loading...");
+  // Check cookie
+  const [meResponse, pagesResponse] = await Promise.all([fetch("/api/me"), fetch("/api/pages")]);
+  if (meResponse.status === 401) {
+    redirect("/login");
+    return;
+  }
+  // Log in, user info
+  const user: User = await meResponse.json();
+  const pages: Page[] = await pagesResponse.json();
+  const hint = document.createElement("p");
+  hint.textContent = pages.length > 0 ? "Pick a page on the left." : "No pages yet. Click New page.";
+  showLayout(buildSidebar(user, pages, null), hint);  
 }
 
 async function renderPage(pageId: number) {
   app.replaceChildren("Loading...");
-  const response = await fetch("/api/pages/" + pageId);
+  const [response, meResponse, pagesResponse] = await Promise.all([
+    fetch("/api/pages/" + pageId),
+    fetch("/api/me"),
+    fetch("/api/pages"),
+  ]);
   if (response.status === 401) {
     redirect("/login");
     return;
@@ -152,6 +175,9 @@ async function renderPage(pageId: number) {
     return;
   }
   const page: PageWithBlocks = await response.json();
+  const user: User = await meResponse.json();
+  const pages: Page[] = await pagesResponse.json();
+  const sidebar = buildSidebar(user, pages, pageId);
   const title = document.createElement("h1");
   title.textContent = page.title;
   title.contentEditable = "true";
@@ -192,7 +218,11 @@ async function renderPage(pageId: number) {
       first.focus();
     }
   });
-  app.replaceChildren(makeLink("Back to workspace", "/workspace"), status, title, editor);
+  const sidebarLink = sidebar.querySelector<HTMLAnchorElement>('[data-page-id="' + pageId + '"]')!;
+  title.addEventListener("input", () => {
+    sidebarLink.textContent = title.textContent || "Untitled";
+  });
+  showLayout(sidebar, status, title, editor);
 }
 
 function renderNotFound() {

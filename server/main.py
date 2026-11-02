@@ -86,7 +86,8 @@ def init_db():
             owner_id INTEGER NOT NULL,
             title TEXT NOT NULL DEFAULT 'Untitled',
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            content TEXT NOT NULL DEFAULT '[]'
         )
     """)
     # Migration
