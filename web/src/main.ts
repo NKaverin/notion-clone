@@ -228,7 +228,17 @@ async function renderPage(pageId: number) {
   title.addEventListener("input", () => {
     sidebarLink.textContent = title.textContent || "Untitled";
   });
-  showLayout(sidebar, status, title, editor);
+  const duplicate = document.createElement("button");
+  duplicate.textContent = "Duplicate";
+  duplicate.addEventListener("click", async () => {
+    // Save first
+    clearTimeout(timer);
+    await save();
+    const response = await fetch("/api/pages/" + pageId + "/duplicate", { method: "POST" });
+    const copy: Page = await response.json();
+    navigate("/page/" + copy.id)
+  })
+  showLayout(sidebar, status, duplicate, title, editor);
 }
 
 function renderNotFound() {

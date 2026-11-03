@@ -294,7 +294,7 @@ def duplicate_page(page_id: int, user: dict = Depends(current_user)):
         taken = {row["title"] for row in db.execute("SELECT title FROM pages WHERE owner_id = ?", (user["id"],))}
         title = copy_title(original["title"], taken)
         cursor = db.execute(
-            "INSET INTO pages (owner_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO pages (owner_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (user["id"], title, original["content"], now, now),
         )
         db.commit()
