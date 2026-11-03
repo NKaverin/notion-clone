@@ -32,6 +32,23 @@ function makeLink(text: string, path: string): HTMLAnchorElement {
   return link;
 }
 
+// For the responce that is not 2xx
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, url: string) {
+    super("HTTP " + status + " from " + url);
+    this.status = status;
+  }
+}
+
+async function getJson<T>(url:string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new HttpError(response.status, url);
+  }
+  return response.json();
+}
+
 async function postJson(url: string, body: object): Promise<Response> {
   return fetch(url, {
     method: "POST",
@@ -146,14 +163,10 @@ function showLayout(sidebar: HTMLElement, ...content: (Node | string)[]) {
 async function renderWorkspace() {
   app.replaceChildren("Loading...");
   // Check cookie
-  const [meResponse, pagesResponse] = await Promise.all([fetch("/api/me"), fetch("/api/pages")]);
-  if (meResponse.status === 401) {
-    redirect("/login");
-    return;
-  }
-  // Log in, user info
-  const user: User = await meResponse.json();
-  const pages: Page[] = await pagesResponse.json();
+  const [user, pages] = await Promise.all([
+    getJson<User>("/api/me"),
+    getJson<Page[]>("/api/pages"),
+  ]);
   const hint = document.createElement("p");
   hint.textContent = pages.length > 0 ? "Pick a page on the left." : "No pages yet. Click New page.";
   showLayout(buildSidebar(user, pages, null), hint);  
@@ -161,22 +174,15 @@ async function renderWorkspace() {
 
 async function renderPage(pageId: number) {
   app.replaceChildren("Loading...");
-  const [response, meResponse, pagesResponse] = await Promise.all([
-    fetch("/api/pages/" + pageId),
-    fetch("/api/me"),
-    fetch("/api/pages"),
+  const [page, user, pages] = await Promise.all([
+    getJson<PageWithBlocks>("/api/pages/" + pageId),
+    getJson<User>("/api/me"),
+    getJson<Page[]>("/api/pages"),
   ]);
-  if (response.status === 401) {
-    redirect("/login");
+  // A user may have move on
+  if (location.pathname !== "/page/" + pageId) {
     return;
   }
-  if (response.status === 404) {
-    renderNotFound();
-    return;
-  }
-  const page: PageWithBlocks = await response.json();
-  const user: User = await meResponse.json();
-  const pages: Page[] = await pagesResponse.json();
   const sidebar = buildSidebar(user, pages, pageId);
   const title = document.createElement("h1");
   title.textContent = page.title;
@@ -231,25 +237,47 @@ function renderNotFound() {
   app.replaceChildren(title, makeLink("Home", "/"));
 }
 
-const routes: Record<string, () => void> = {
+function renderError(error: unknown) {
+  const title = document.createElement("h1");
+  title.textContent = "Something went wrong";
+  const detail = document.createElement("p");
+  detail.textContent = String(error);
+  app.replaceChildren(title, detail, makeLink("Home", "/"));
+}
+
+const routes: Record<string, () => Promise<void> | void> = {
   "/": renderHome,
   "/login": renderLogin,
   "/workspace": renderWorkspace,
 };
 
-function render() {
+async function render() {
   const path = location.pathname;
-  if (path.startsWith("/page/")) {
-    const pageId = Number(path.slice("/page/".length));
-    if (Number.isInteger(pageId)) {
-      renderPage(pageId);
-    } else {
-      renderNotFound();
+  try {
+    if (path.startsWith("/page/")) {
+      const pageId = Number(path.slice("/page/".length));
+      if (Number.isInteger(pageId)) {
+        await renderPage(pageId);
+      } else {
+        renderNotFound();
+      }
+      return;
     }
-    return;
+    const view = routes[path] ?? renderNotFound;
+    await view();
+  } catch (error) {
+    console.error("render failed", error);
+    if (location.pathname !== path) {
+      return;
+    }
+    if (error instanceof HttpError && error.status === 401) {
+      redirect("/login")
+    } else if (error instanceof HttpError && error.status === 404) {
+      renderNotFound();
+    } else {
+      renderError(error);
+    }
   }
-  const view = routes[path] ?? renderNotFound;
-  view();
 }
 
 function navigate(path: string) {
