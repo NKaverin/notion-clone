@@ -38,6 +38,10 @@ class PageUpdate(BaseModel):
     title: str
     blocks: list[BlockModel]
 
+class PageMove(BaseModel):
+    parent_id: int | None
+    index: int
+
 class CodeVerify(BaseModel):
     email: EmailStr
     code: str
@@ -63,7 +67,11 @@ def add_parent_column(db:sqlite3.Connection):
     # NULL is a top-level page
     db.execute("ALTER TABLE pages ADD COLUMN parent_id INTEGER")
 
-MIGRATIONS = [add_content_column, add_parent_column]
+def add_position_column(db: sqlite3.Connection):
+    db.execute("ALTER TABLE pages ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+    db.execute("UPDATE pages SET position = id")
+
+MIGRATIONS = [add_content_column, add_parent_column, add_position_column]
 
 def init_db():
     db = get_db()
@@ -229,12 +237,17 @@ def list_pages(user: dict = Depends(current_user)):
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, title, parent_id, updated_at FROM pages WHERE owner_id = ? ORDER BY id",
+            "SELECT id, title, parent_id, position, updated_at FROM pages WHERE owner_id = ? ORDER BY position",
             (user["id"],),
         ).fetchall()
     finally:
         db.close()
     return [dict(row) for row in rows]
+
+# A position after all of the user's pages
+def next_position(db: sqlite3.Connection, user: dict) -> int:
+    row = db.execute("SELECT MAX(position) FROM pages WHERE owner_id = ?", (user["id"]),)
+    return (row[0] or 0) + 1
 
 # 201 - a resource did not exist before
 @app.post("/api/pages", status_code=201)
@@ -243,8 +256,8 @@ def create_page(user: dict = Depends(current_user)):
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO pages (owner_id, created_at, updated_at) VALUES (?, ?, ?)",
-            (user["id"], now, now),
+            "INSERT INTO pages (owner_id, position, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (user["id"], next_position(db, user), now, now),
         )
         db.commit()
     finally:
@@ -309,8 +322,8 @@ def duplicate_page(page_id: int, user: dict = Depends(current_user)):
         taken = {row["title"] for row in db.execute("SELECT title FROM pages WHERE owner_id = ?", (user["id"],))}
         title = copy_title(original["title"], taken)
         cursor = db.execute(
-            "INSERT INTO pages (owner_id, parent_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user["id"], original["parent_id"], title, original["content"], now, now),
+            "INSERT INTO pages (owner_id, parent_id, position, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user["id"], original["parent_id"], next_position(db, user), title, original["content"], now, now),
         )
         db.commit()
     finally:
@@ -324,10 +337,28 @@ def create_child_page(page_id: int, user: dict = Depends(current_user)):
     try: 
         get_owned_page(db, page_id, user)
         cursor = db.execute(
-            "INSERT INTO pages (owner_id, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (user["id"], page_id, now, now),
+            "INSERT INTO pages (owner_id, parent_id, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (user["id"], page_id, next_position(db, user), now, now),
         )
         db.commit()
     finally:
         db.close()
     return {"id": cursor.lastrowid, "title": "Untitled", "parent_id": page_id, "updated_at": now}
+
+@app.post("/api/pages/{page_id}/move")
+def move_page(page_id: int, body: PageMove, user: dict = Depends(current_user)):
+    db = get_db()
+    try:
+        get_owned_page(db, page_id, user)
+        if body.parent_id is not None:
+            get_owned_page(db, body.parent_id, user)
+            # Walk from new parent
+            ancestor = body.parent_id
+            while ancestor is not None:
+                if ancestor == page_id:
+                    raise HTTPException(status_code=400, detail="Can't move a page inside itself")
+                row = db.execute("SELECT parent_id FROM pages WHERE id = ?", (ancestor,))
+                ancestor = row["parent_id"]
+    finally:
+        db.close()
+    return {"ok": True}
