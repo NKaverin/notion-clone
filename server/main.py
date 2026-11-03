@@ -237,19 +237,32 @@ def create_page(user: dict = Depends(current_user)):
     # lastrowid: the id SQLite just assigned to the inserted row
     return {"id": cursor.lastrowid, "title": "Untitled", "updated_at": now}
 
+def get_owned_page(db: sqlite3.Connection, page_id: int, user: dict) -> sqlite3.Row:
+    row = db.execute(
+        "SELECT id, title, content, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
+        (page_id, user["id"]),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return row
+
+# Copy of X (n) if that title is already taken
+def copy_title(title: str, taken: set[str]) -> str:
+    base = "Copy of " + title
+    if base not in taken:
+        return base
+    n = 1
+    while f"{base} ({n})" in taken:
+        n += 1
+    return f"{base} ({n})"
+
 @app.get("/api/pages/{page_id}")
 def get_page(page_id: int, user: dict = Depends(current_user)):
     db = get_db()
     try:
-        row = db.execute(
-            "SELECT id, title, content, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
-            (page_id, user["id"]),
-        ).fetchone()
+        row = get_owned_page(db, page_id, user)
     finally:
         db.close()
-    # If owned by someone else, gets the same 404
-    if row is None:
-        raise HTTPException(status_code=404, detail="Page not found")
     page = dict(row)
     page["blocks"] = json.loads(page.pop("content"))
     return page
@@ -271,3 +284,20 @@ def update_page(page_id: int, body: PageUpdate, user: dict = Depends(current_use
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Page not found")
     return {"updated_at": now}
+
+@app.post("/api/pages/{page_id}/duplicate", status_code=201)
+def duplicate_page(page_id: int, user: dict = Depends(current_user)):
+    now = int(time.time())
+    db = get_db()
+    try:
+        original = get_owned_page(db, page_id, user)
+        taken = {row["title"] for row in db.execute("SELECT title FROM pages WHERE owner_id = ?", (user["id"],))}
+        title = copy_title(original["title"], taken)
+        cursor = db.execute(
+            "INSET INTO pages (owner_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (user["id"], title, original["content"], now, now),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return {"id": cursor.lastrowid, "title": title, "updated_at": now}
