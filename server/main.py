@@ -53,6 +53,18 @@ def get_db():
     db.row_factory = sqlite3.Row
     return db
 
+# Migrations
+def add_content_column(db: sqlite3.Connection):
+    columns = [row["name"] for row in db.execute("PRAGMA table_info(pages)")]
+    if "content" not in columns:
+        db.execute("ALTER TABLE pages ADD COLUMN content TEXT NOT NULL DEFAULT '[]'")
+
+def add_parent_column(db:sqlite3.Connection):
+    # NULL is a top-level page
+    db.execute("ALTER TABLE pages ADD COLUMN parent_id INTEGER")
+
+MIGRATIONS = [add_content_column, add_parent_column]
+
 def init_db():
     db = get_db()
     db.execute("""
@@ -87,13 +99,16 @@ def init_db():
             title TEXT NOT NULL DEFAULT 'Untitled',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
-            content TEXT NOT NULL DEFAULT '[]'
+            content TEXT NOT NULL DEFAULT '[]',
+            parent_id INTEGER
         )
     """)
-    # Migration
-    columns = [row["name"] for row in db.execute("PRAGMA table_info(pages)")]
-    if "content" not in columns:
-        db.execute("ALTER TABLE pages ADD COLUMN content TEXT NOT NULL DEFAULT '[]'")
+    # Migrations
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    for number, migrate in enumerate(MIGRATIONS[version:], start= version + 1):
+        migrate(db)
+        db.execute(f"PRAGMA user_version = {number}")
+
     db.commit()
     db.close()
 
@@ -214,7 +229,7 @@ def list_pages(user: dict = Depends(current_user)):
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, title, updated_at FROM pages WHERE owner_id = ? ORDER BY id",
+            "SELECT id, title, parent_id, updated_at FROM pages WHERE owner_id = ? ORDER BY id",
             (user["id"],),
         ).fetchall()
     finally:
@@ -239,7 +254,7 @@ def create_page(user: dict = Depends(current_user)):
 
 def get_owned_page(db: sqlite3.Connection, page_id: int, user: dict) -> sqlite3.Row:
     row = db.execute(
-        "SELECT id, title, content, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
+        "SELECT id, parent_id, title, content, created_at, updated_at FROM pages WHERE id = ? AND owner_id = ?",
         (page_id, user["id"]),
     ).fetchone()
     if row is None:
@@ -294,10 +309,25 @@ def duplicate_page(page_id: int, user: dict = Depends(current_user)):
         taken = {row["title"] for row in db.execute("SELECT title FROM pages WHERE owner_id = ?", (user["id"],))}
         title = copy_title(original["title"], taken)
         cursor = db.execute(
-            "INSERT INTO pages (owner_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (user["id"], title, original["content"], now, now),
+            "INSERT INTO pages (owner_id, parent_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (user["id"], original["parent_id"], title, original["content"], now, now),
         )
         db.commit()
     finally:
         db.close()
-    return {"id": cursor.lastrowid, "title": title, "updated_at": now}
+    return {"id": cursor.lastrowid, "title": title, "parent_id": original["parent_id"], "updated_at": now}
+
+@app.post("/api/pages/{page_id}/children", status_code=201)
+def create_child_page(page_id: int, user: dict = Depends(current_user)):
+    now = int(time.time())
+    db = get_db()
+    try: 
+        get_owned_page(db, page_id, user)
+        cursor = db.execute(
+            "INSERT INTO pages (owner_id, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (user["id"], page_id, now, now),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return {"id": cursor.lastrowid, "title": "Untitled", "parent_id": page_id, "updated_at": now}
