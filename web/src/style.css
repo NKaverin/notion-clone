@@ -39,3 +39,37 @@
     background: #e3e3e1;
     font-weight: bold;
 }
+
+
+/* Sub-pages sit indented under their parent. */
+.sidebar ul ul {
+    padding-left: 16px;
+}
+
+.sidebar .row {
+    display: flex;
+    align-items: center;
+}
+
+.sidebar .row a {
+    flex: 1;
+    min-width: 0;
+}
+
+.sidebar .toggle,
+.sidebar .add {
+    border: none;
+    background: none;
+    cursor: pointer;
+    width: 20px;
+    padding: 0;
+}
+
+/* The + only appears on the row under the mouse. */
+.sidebar .add {
+    visibility: hidden;
+}
+
+.sidebar .row:hover .add {
+    visibility: visible;
+}

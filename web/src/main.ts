@@ -11,6 +11,7 @@ type User = {
 type Page = {
   id: number;
   title: string;
+  parent_id: number | null;
   updated_at: number;
 };
 
@@ -117,22 +118,77 @@ function renderCodeForm(email: string) {
   app.replaceChildren(title, hint, form, message, makeLink("Start again", "/login"));
 }
 
-function buildSidebar(user: User, pages: Page[], currentId: number | null) : HTMLElement {
-  const sidebar = document.createElement("nav");
-  sidebar.className = "sidebar";
-  const who = document.createElement("p");
-  who.textContent = user.email;
+const expanded = new Set<number>();
+
+function buildTree(parentId: number | null, byParent: Map<number | null, Page[]>, currentId: number | null): HTMLUListElement {
   const list = document.createElement("ul");
-  for (const page of pages) {
+  for (const page of byParent.get(parentId) ?? []) {
     const item = document.createElement("li");
+    const row = document.createElement("div");
+    row.className = "row";
+    const toggle = document.createElement("button");
+    toggle.className = "toggle";
     const link = makeLink(page.title || "Untitled", "/page/" + page.id);
     link.dataset.pageId = String(page.id);
     if (page.id === currentId) {
       link.setAttribute("aria-current", "page");
     }
-    item.append(link);
+    const add = document.createElement("button");
+    add.className = "add";
+    add.textContent = "+";
+    add.title = "Add a page inside";
+    add.addEventListener("click", async () => {
+      const responce = await fetch("/api/pages/" + page.id + "/children", { method: "POST" });
+      const child: Page = await responce.json();
+      expanded.add(page.id);
+      navigate("/page/" + child.id);
+    });
+    row.append(toggle, link, add);
+    item.append(row);
+    const children = byParent.get(page.id) ?? [];
+    if (children.length > 0) {
+      const childList = buildTree(page.id, byParent, currentId);
+      childList.hidden = !expanded.has(page.id);
+      toggle.textContent = childList.hidden ? "▸" : "▾";
+      toggle.addEventListener("click", ()=> {
+        childList.hidden = !childList.hidden;
+        if (childList.hidden) {
+          expanded.delete(page.id);
+        } else {
+          expanded.add(page.id);
+        }
+        toggle.textContent = childList.hidden ? "▸" : "▾";
+      });
+      item.append(childList);
+    } else {
+      toggle.style.visibility = "hidden";
+    }
     list.append(item);
   }
+  return list;
+}
+
+function buildSidebar(user: User, pages: Page[], currentId: number | null) : HTMLElement {
+  const sidebar = document.createElement("nav");
+  sidebar.className = "sidebar";
+  const who = document.createElement("p");
+  who.textContent = user.email;
+  // Group by parent
+  const byParent = new Map<number | null, Page[]>();
+  const byId = new Map<number, Page>();
+  for (const page of pages) {
+    byId.set(page.id, page);
+    const siblings = byParent.get(page.parent_id) ?? [];
+    siblings.push(page);
+    byParent.set(page.parent_id, siblings);
+  }
+  // Open every ancestor of the current page
+  let ancestor = currentId === null ? null : byId.get(currentId)?.parent_id ?? null;
+  while (ancestor !== null) {
+    expanded.add(ancestor);
+    ancestor = byId.get(ancestor)?.parent_id ?? null;
+  }
+  const list = buildTree(null, byParent, currentId);
   const create = document.createElement("button");
   create.textContent = "New page";
   create.addEventListener("click", async () => {
