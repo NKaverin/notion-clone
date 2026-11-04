@@ -359,6 +359,19 @@ def move_page(page_id: int, body: PageMove, user: dict = Depends(current_user)):
                     raise HTTPException(status_code=400, detail="Can't move a page inside itself")
                 row = db.execute("SELECT parent_id FROM pages WHERE id = ?", (ancestor,))
                 ancestor = row["parent_id"]
+        siblings = [
+            row["id"]
+            for row in db.execute(
+                "SELECT id FROM pages WHERE owner_id = ? AND parent_id IS ? AND id != ? ORDER BY position",
+                (user["id"], body.parent_id, page_id),
+            )
+        ]
+        index = max(0, min(body.index, len(siblings)))
+        siblings.insert(index, page_id)
+        db.execute("UPDATE pages SET parent_id = ? WHERE id = ?", (body.parent_id, page_id))
+        for position, sibling_id in enumerate(siblings):
+            db.execute("UPDATE pages SET position = ? WHERE id = ?", (position, sibling_id))
+        db.commit()
     finally:
         db.close()
     return {"ok": True}

@@ -73,3 +73,18 @@
 .sidebar .row:hover .add {
     visibility: visible;
 }
+
+/* Where a dragged page would land: a line above or below, or a highlight
+   for "inside". */
+.sidebar .row[data-drop="before"] {
+    box-shadow: inset 0 2px 0 #2383e2;
+}
+
+.sidebar .row[data-drop="after"] {
+    box-shadow: inset 0 -2px 0 #2383e2;
+}
+
+.sidebar .row[data-drop="inside"] {
+    background: #d3e5fa;
+    border-radius: 4px;
+}

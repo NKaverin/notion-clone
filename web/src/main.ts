@@ -12,6 +12,7 @@ type Page = {
   id: number;
   title: string;
   parent_id: number | null;
+  position: number;
   updated_at: number;
 };
 
@@ -120,6 +121,42 @@ function renderCodeForm(email: string) {
 
 const expanded = new Set<number>();
 
+let draggingId: number | null = null;
+
+async function refreshSidebar() {
+  const [user, pages] = await Promise.all([
+    getJson<User>("/api/me"), 
+    getJson<Page[]>("/api/pages")
+  ]);
+  const match = location.pathname.match(/^\/page\/(\d+)$/);
+  const currentId = match === null ? null : Number(match[1]);
+  document.querySelector(".sidebar")!.replaceWith(buildSidebar(user, pages, currentId));
+}
+
+async function movePage(pageId: number, parentId: number | null, index: number) {
+  const responce = await fetch("/api/pages/" + pageId + "/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify( { parentId: parentId, index })
+  });
+  if (!responce.ok) {
+    console.error(responce.status);
+  }
+  await refreshSidebar();
+}
+
+function dropZone(row: HTMLElement, event: DragEvent): "before" | "after" | "inside" {
+  const box = row.getBoundingClientRect();
+  const y = event.clientY - box.top;
+  if (y < box.height / 4) {
+    return "before";
+  }
+  if (y > (box.height * 3) / 4) {
+    return "after";
+  }
+  return "inside";
+}
+
 function buildTree(parentId: number | null, byParent: Map<number | null, Page[]>, currentId: number | null): HTMLUListElement {
   const list = document.createElement("ul");
   for (const page of byParent.get(parentId) ?? []) {
@@ -143,6 +180,53 @@ function buildTree(parentId: number | null, byParent: Map<number | null, Page[]>
       expanded.add(page.id);
       navigate("/page/" + child.id);
     });
+    // Drag'n'drop
+    row.draggable = true;
+    row.addEventListener("dragstart", (event) => {
+      draggingId = page.id;
+      event.dataTransfer!.effectAllowed = "move";
+      event.dataTransfer!.setData("text/plain", String(page.id));
+    });
+    row.addEventListener("dragend", () => {
+      draggingId = null;
+    });
+    row.addEventListener("dragover", (event) => {
+      if (draggingId === null) {
+        return;
+      }
+      const draggedItem = document.querySelector('.sidebar [data-page-id="' + draggingId + '"]')!.closest("li")!;
+      if (draggedItem.contains(row)) {
+        return;
+      }
+      event.preventDefault();
+      row.dataset.drop = dropZone(row, event);
+    });
+    row.addEventListener("dragleave", () => {
+      delete row.dataset.drop;
+    });
+    row.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      delete row.dataset.drop;
+      if (draggingId === null) {
+        return;
+      }
+      const moving = draggingId;
+      const zone = dropZone(row, event);
+      const parentId = zone === "inside" ? page.id : page.parent_id;
+      const siblings = (byParent.get(parentId) ?? []).filter((p) => p.id !== moving);
+      let index = siblings.length;
+      if (zone === "before") {
+        index = siblings.findIndex((p) => p.id === page.id);
+      }
+      if (zone === "after") {
+        index = siblings.findIndex((p) => p.id === page.id) + 1;
+      }
+      if (zone === "inside") {
+        expanded.add(page.id);
+      }
+      await movePage(moving, parentId, index);
+    });
+
     row.append(toggle, link, add);
     item.append(row);
     const children = byParent.get(page.id) ?? [];
@@ -280,9 +364,11 @@ async function renderPage(pageId: number) {
       first.focus();
     }
   });
-  const sidebarLink = sidebar.querySelector<HTMLAnchorElement>('[data-page-id="' + pageId + '"]')!;
   title.addEventListener("input", () => {
-    sidebarLink.textContent = title.textContent || "Untitled";
+    const link = document.querySelector('.sidebar [data-page-id="' + pageId + '"]');
+    if (link !== null) {
+      link.textContent = title.textContent || "Untitled";
+    }
   });
   const duplicate = document.createElement("button");
   duplicate.textContent = "Duplicate";
