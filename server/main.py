@@ -100,6 +100,8 @@ def init_db():
             expires_at INTEGER NOT NULL
         )
     """)
+    # No pages = fresh db
+    fresh = db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pages'").fetchone() is None
     db.execute("""
         CREATE TABLE IF NOT EXISTS pages (
             id INTEGER PRIMARY KEY,
@@ -108,15 +110,18 @@ def init_db():
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             content TEXT NOT NULL DEFAULT '[]',
-            parent_id INTEGER
+            parent_id INTEGER,
+            position INTEGER NOT NULL DEFAULT 0
         )
     """)
+    if fresh:
+        db.execute(f"PRAGMA user_version = {len(MIGRATIONS)}")
     # Migrations
     version = db.execute("PRAGMA user_version").fetchone()[0]
     for number, migrate in enumerate(MIGRATIONS[version:], start= version + 1):
         migrate(db)
         db.execute(f"PRAGMA user_version = {number}")
-
+    db.execute("CREATE INDEX IF NOT EXISTS pages_siblings ON pages (owner_id, parent_id, position)")
     db.commit()
     db.close()
 
@@ -246,7 +251,7 @@ def list_pages(user: dict = Depends(current_user)):
 
 # A position after all of the user's pages
 def next_position(db: sqlite3.Connection, user: dict) -> int:
-    row = db.execute("SELECT MAX(position) FROM pages WHERE owner_id = ?", (user["id"]),)
+    row = db.execute("SELECT MAX(position) FROM pages WHERE owner_id = ?", (user["id"],)).fetchone()
     return (row[0] or 0) + 1
 
 # 201 - a resource did not exist before
@@ -357,8 +362,9 @@ def move_page(page_id: int, body: PageMove, user: dict = Depends(current_user)):
             while ancestor is not None:
                 if ancestor == page_id:
                     raise HTTPException(status_code=400, detail="Can't move a page inside itself")
-                row = db.execute("SELECT parent_id FROM pages WHERE id = ?", (ancestor,))
+                row = db.execute("SELECT parent_id FROM pages WHERE id = ?", (ancestor,)).fetchone()
                 ancestor = row["parent_id"]
+        # Bottleneck to change
         siblings = [
             row["id"]
             for row in db.execute(

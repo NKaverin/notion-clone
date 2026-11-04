@@ -137,7 +137,7 @@ async function movePage(pageId: number, parentId: number | null, index: number) 
   const responce = await fetch("/api/pages/" + pageId + "/move", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify( { parentId: parentId, index })
+    body: JSON.stringify( { parent_id: parentId, index })
   });
   if (!responce.ok) {
     console.error(responce.status);
